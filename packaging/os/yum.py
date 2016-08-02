@@ -63,9 +63,9 @@ options:
     default: null
   state:
     description:
-      - Whether to install (C(present) or C(installed), C(latest)), or remove (C(absent) or C(removed)) a package.
+      - Whether to install (C(present) or C(installed), C(latest) C(updated)), or remove (C(absent) or C(removed)) a package.
     required: false
-    choices: [ "present", "installed", "latest", "absent", "removed" ]
+    choices: [ "present", "installed", "latest", "updated", "absent", "removed" ]
     default: "present"
   enablerepo:
     description:
@@ -169,6 +169,9 @@ EXAMPLES = '''
 
 - name: upgrade all packages
   yum: name=* state=latest
+
+- name: upgrade specific package if already installed
+  yum: name=httpd state=updated
 
 - name: install the nginx rpm from a remote repo
   yum: name=http://nginx.org/packages/centos/6/noarch/RPMS/nginx-release-centos-6-0.el6.ngx.noarch.rpm state=present
@@ -785,7 +788,7 @@ def remove(module, items, repoq, yum_basecmd, conf_file, en_repos, dis_repos):
 
     return res
 
-def latest(module, items, repoq, yum_basecmd, conf_file, en_repos, dis_repos):
+def latest(module, items, repoq, yum_basecmd, conf_file, en_repos, dis_repos, force_install):
 
     res = {}
     res['results'] = []
@@ -842,7 +845,7 @@ def latest(module, items, repoq, yum_basecmd, conf_file, en_repos, dis_repos):
             else:
                 if is_installed(module, repoq, spec, conf_file, en_repos=en_repos, dis_repos=dis_repos):
                     pkgs['update'].append(spec)
-                else:
+                elif force_install:
                     pkgs['install'].append(spec)
             pkglist = what_provides(module, repoq, spec, conf_file, en_repos=en_repos, dis_repos=dis_repos)
             # FIXME..? may not be desirable to throw an exception here if a single package is missing
@@ -961,7 +964,7 @@ def ensure(module, state, pkgs, conf_file, enablerepo, disablerepo,
         e_cmd = ['--exclude=%s' % exclude]
         yum_basecmd.extend(e_cmd)
 
-    if state in ['installed', 'present', 'latest']:
+    if state in ['installed', 'present', 'latest', 'updated']:
 
         if module.params.get('update_cache'):
             module.run_command(yum_basecmd + ['makecache'])
@@ -992,10 +995,10 @@ def ensure(module, state, pkgs, conf_file, enablerepo, disablerepo,
         res = install(module, pkgs, repoq, yum_basecmd, conf_file, en_repos, dis_repos)
     elif state in ['removed', 'absent']:
         res = remove(module, pkgs, repoq, yum_basecmd, conf_file, en_repos, dis_repos)
-    elif state == 'latest':
+    elif state in ['latest', 'updated']:
         if disable_gpg_check:
             yum_basecmd.append('--nogpgcheck')
-        res = latest(module, pkgs, repoq, yum_basecmd, conf_file, en_repos, dis_repos)
+        res = latest(module, pkgs, repoq, yum_basecmd, conf_file, en_repos, dis_repos, state=='latest')
     else:
         # should be caught by AnsibleModule argument_spec
         module.fail_json(msg="we should never get here unless this all"
@@ -1022,7 +1025,7 @@ def main():
             name=dict(aliases=['pkg'], type="list"),
             exclude=dict(required=False, default=None),
             # removed==absent, installed==present, these are accepted as aliases
-            state=dict(default='installed', choices=['absent','present','installed','removed','latest']),
+            state=dict(default='installed', choices=['absent','present','installed','updated','removed','latest']),
             enablerepo=dict(),
             disablerepo=dict(),
             list=dict(),
